@@ -30,19 +30,35 @@ public sealed class TimeSeries
         get { lock (_lock) return _samples.Count == 0 ? null : _samples[0]; }
     }
 
+    /// <summary>
+    /// Append a sample. A sample with a timestamp that already exists replaces
+    /// the old value (last-write-wins), which also makes WAL replay idempotent.
+    /// </summary>
     public void Append(Sample sample)
     {
         lock (_lock)
         {
-            // Fast path: the common case is in-order appends.
-            if (_samples.Count == 0 || sample.TimestampUnixMs >= _samples[^1].TimestampUnixMs)
+            if (_samples.Count == 0)
             {
                 _samples.Add(sample);
                 return;
             }
+            var last = _samples[^1];
+            if (sample.TimestampUnixMs > last.TimestampUnixMs)
+            {
+                _samples.Add(sample);
+                return;
+            }
+            if (sample.TimestampUnixMs == last.TimestampUnixMs)
+            {
+                _samples[^1] = sample;
+                return;
+            }
             var index = _samples.BinarySearch(sample, SampleTimestampComparer.Instance);
-            if (index < 0) index = ~index;
-            _samples.Insert(index, sample);
+            if (index >= 0)
+                _samples[index] = sample;
+            else
+                _samples.Insert(~index, sample);
         }
     }
 
