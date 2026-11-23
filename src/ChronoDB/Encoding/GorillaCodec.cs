@@ -72,8 +72,12 @@ public static class GorillaCodec
             }
             else
             {
-                var leading = BitOperations.LeadingZeroCount((ulong)xor);
+                // The leading-zero count is stored in 5 bits (0..31), so clamp
+                // anything larger and let the extra zeros ride along as
+                // meaningful bits — the value still round-trips exactly.
+                var leading = Math.Min(BitOperations.LeadingZeroCount((ulong)xor), 31);
                 var trailing = BitOperations.TrailingZeroCount((ulong)xor);
+                var meaningful = 64 - leading - trailing;
                 if (haveWindow && leading >= prevLeading && trailing >= prevTrailing)
                 {
                     // Reuse the previous window: only the meaningful bits.
@@ -84,8 +88,8 @@ public static class GorillaCodec
                 {
                     writer.WriteBits(0b11, 2);
                     writer.WriteBits((ulong)leading, 5);
-                    var meaningful = 64 - leading - trailing;
-                    writer.WriteBits((ulong)meaningful, 6);
+                    // Meaningful is 1..64; store it minus one so 64 fits in 6 bits.
+                    writer.WriteBits((ulong)(meaningful - 1), 6);
                     writer.WriteBits((ulong)xor >> trailing, meaningful);
                     prevLeading = leading;
                     prevTrailing = trailing;
@@ -152,7 +156,7 @@ public static class GorillaCodec
                 else
                 {
                     var leading = (int)reader.ReadBits(5);
-                    var meaningful = (int)reader.ReadBits(6);
+                    var meaningful = (int)reader.ReadBits(6) + 1;
                     var trailing = 64 - leading - meaningful;
                     xor = (long)(reader.ReadBits(meaningful) << trailing);
                     prevLeading = leading;
